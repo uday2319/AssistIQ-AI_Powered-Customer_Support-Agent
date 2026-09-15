@@ -1,0 +1,9 @@
+Cancellation Policy
+
+Customers can cancel an order before it has been shipped.
+
+Once an order has been shipped, cancellation is normally unavailable.
+
+For shipped orders, customers may need to wait for delivery and request a return or refund according to the refund policy.
+
+Cancellation requests should include the customer's order ID.

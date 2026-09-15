@@ -5,6 +5,7 @@ from config import GOOGLE_API_KEY
 from schemas import supportResponse
 from prompts import support_prompt
 from tools.customer_tools import get_customer
+from tools.knowledge_tools import search_knowledge_base
 
 llm=ChatGoogleGenerativeAI(
     model="gemini-3.6-flash",
@@ -12,7 +13,7 @@ llm=ChatGoogleGenerativeAI(
 )
 agent=create_agent(
     model=llm,
-    tools=[get_order_status, get_customer]
+    tools=[get_order_status, get_customer, search_knowledge_base],
 )
 
 customer_message=input("Customer: ")
