@@ -7,7 +7,7 @@ from tools.knowledge_tools import search_knowledge_base
 from tools.cancellation_tools import cancel_order 
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import AIMessage
-
+from tools.permissions import READ_TOOLS, ACTION_TOOLS
 from tools.refund_tools import (
     request_refund,
     check_refund_eligibility,
@@ -18,9 +18,11 @@ from graph.nodes import (
     refund_eligibility_node,
     human_approval_node,
     execute_refund_node,
-    prepare_refund_node
+    prepare_refund_node,
+    prepare_cancellation_node,
+    cancel_order_node
 )
-tools=[get_order_status, get_customer, search_knowledge_base,cancel_order]
+tools=[get_order_status, get_customer, search_knowledge_base]
 tool_node=ToolNode(tools)
 
 checkpointer=MemorySaver()
@@ -30,25 +32,38 @@ def route_after_agent(state: SupportState):
     last_message = state["messages"][-1]
 
     if isinstance(last_message, AIMessage) and last_message.tool_calls:
+        return "end"
 
-        for tool_call in last_message.tool_calls:
+    for tool_call in last_message.tool_calls:
 
-            tool_name = tool_call["name"]
+        tool_name = tool_call["name"]
 
-            if tool_name == "request_refund":
+        if tool_name == "request_refund":
+            order_id = tool_call["args"]["order_id"]
 
-                # Extract the order ID Gemini supplied
-                # in the structured tool call.
-                order_id = tool_call["args"]["order_id"]
+                
+            state["refund_order_id"] = order_id
 
-                # Store it in the graph state.
-                state["refund_order_id"] = order_id
+            return "refund"
 
-                return "refund"
+        if tool_name == "cancel_order":
 
-        return "tools"
+            order_id = tool_call["args"]["order_id"]
 
-    return "end"
+            state["cancel_order_id"] = order_id
+
+            return "cancel"
+
+ 
+        if tool_name in ACTION_TOOLS:
+            return "end"
+
+        if tool_name in READ_TOOLS:
+            continue
+ 
+        return "end"
+
+    return "tools"
 
 def route_after_approval(state: SupportState):
     """
@@ -93,7 +108,15 @@ builder.add_node(
     "execute_refund",
     execute_refund_node
 )
+builder.add_node(
+    "prepare_cancellation",
+     prepare_cancellation_node
+)
 
+builder.add_node(
+    "cancel_order",
+     cancel_order_node
+)
 
 builder.add_edge(START, "agent")
 builder.add_edge(
@@ -101,13 +124,22 @@ builder.add_edge(
     "refund_eligibility"
 )
 builder.add_edge("tools", "agent")
+builder.add_edge(
+    "prepare_cancellation",
+    "cancel_order"
+)
 
+builder.add_edge(
+    "cancel_order",
+    END
+)
 builder.add_conditional_edges(
     "agent",
     route_after_agent,
     {
         "tools": "tools",
         "refund": "prepare_refund",
+        "cancel": "prepare_cancellation",
         "end": END
     }
 )

@@ -1,5 +1,5 @@
 from langchain_google_genai import ChatGoogleGenerativeAI
-
+from db.queries import cancel_order
 from config import GOOGLE_API_KEY
 from graph.state import SupportState
 from tools.order_tools import get_order_status
@@ -9,6 +9,7 @@ from tools.cancellation_tools import cancel_order
 from langgraph.types import interrupt
 from tools.refund_tools import check_refund_eligibility, execute_refund
 from langgraph.types import interrupt
+from langchain_core.runnables import RunnableConfig
 
 from tools.refund_tools import (
     request_refund,
@@ -17,8 +18,9 @@ from tools.refund_tools import (
 )
 
 llm = ChatGoogleGenerativeAI(
-    model="gemini-3.6-flash",
-    google_api_key=GOOGLE_API_KEY
+    model=+"gemini-3.6-flash",
+    google_api_key=GOOGLE_API_KEY,
+    max_retries=2
 )
 
 llm_with_tools=llm.bind_tools([get_order_status, 
@@ -68,11 +70,10 @@ def refund_eligibility_node(state: SupportState):
     Check whether the requested refund is eligible.
     """
 
-    # Get the order ID prepared by the previous node.
     order_id = state["refund_order_id"]
+    customer_id = state["customer_id"]
 
-    # Run deterministic backend validation.
-    refund_info = check_refund_eligibility(order_id)
+    refund_info = check_refund_eligibility(order_id,customer_id)
 
     # Store the result in graph state.
     return {
@@ -122,4 +123,54 @@ def prepare_refund_node(state: SupportState):
     # Store it in the graph state.
     return {
         "refund_order_id": order_id
+    }
+
+
+def prepare_cancellation_node(state: SupportState):
+    """
+    Extract the order ID requested by Gemini.
+
+    The order ID comes from Gemini because it is the customer's
+    requested target.
+
+    The customer ID does NOT come from Gemini.
+    It comes from trusted application state.
+    """
+
+    last_message = state["messages"][-1]
+
+    cancellation_tool_call = next(
+        tool_call
+        for tool_call in last_message.tool_calls
+        if tool_call["name"] == "cancel_order"
+    )
+
+    
+    order_id = cancellation_tool_call["args"]["order_id"]
+
+    return {
+        "cancel_order_id": order_id
+    }
+
+def cancel_order_node(state: SupportState):
+    """
+    Execute cancellation using the trusted customer ID.
+    """
+
+    order_id = state["cancel_order_id"]
+    customer_id = state["customer_id"]
+
+    result = cancel_order(
+        order_id=order_id,
+        customer_id=customer_id
+    )
+
+    return {
+        "cancel_result": result,
+        "messages": [
+            {
+                "role": "assistant",
+                "content": result["message"]
+            }
+        ]
     }

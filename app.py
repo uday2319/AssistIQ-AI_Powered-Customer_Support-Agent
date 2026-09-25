@@ -23,7 +23,7 @@ config=config
 print("\n--- Graph paused ---")
 print(result["__interrupt__"])
 
-approval = "rejected"
+approval = "Accepted"
 
 
 result = support_graph.invoke(

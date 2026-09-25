@@ -13,15 +13,15 @@ class RefundInput(BaseModel):
     )
 
 
-def check_refund_eligibility(order_id:str)->dict:
+def check_refund_eligibility(order_id:str,customer_id: str)->dict:
     """
-    Check whether an order can be refunded.
+    Perform all backend checks before a refund can proceed.
 
-    IMPORTANT:
-    This function only checks the refund conditions.
-    It does NOT create a refund.
+    customer_id comes from trusted application state,
+    so Gemini cannot choose whose order is being accessed.
     """
-    order=find_order(order_id)
+    
+    order=find_order(order_id,customer_id)
     if order is None:
         return {
             "eligible":False,

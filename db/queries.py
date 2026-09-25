@@ -1,13 +1,13 @@
 from db.connection import get_connection
 
 
-def find_order(order_id: str) -> dict | None:
+def find_order(order_id: str,customer_id:str) -> dict | None:
     """
-    Find an order in PostgreSQL using its order ID.
+    Find an order only if it belongs to the authenticated customer.
 
-    Returns:
-        Order information if found.
-        None if the order doesn't exist.
+    Why:
+    Knowing an order ID should NOT automatically give access
+    to that order.
     """
 
     # Open a connection to PostgreSQL.
@@ -25,9 +25,10 @@ def find_order(order_id: str) -> dict | None:
                     expected_delivery,
                     delivered_at
                 FROM orders
-                WHERE order_id = %s;
+                WHERE order_id = %s
+                AND customer_id=%s;
                 """,
-                (order_id,)
+                (order_id,customer_id)
             )
 
             order = cursor.fetchone()
@@ -52,12 +53,14 @@ def find_order(order_id: str) -> dict | None:
         
         connection.close()
 
-def cancel_order(order_id: str) -> dict | None:
+def cancel_order(order_id: str,customer_id:str) -> dict | None:
     """
-    Cancel an order in PostgreSQL.
+    Cancel an order only if:
+    1. The order belongs to the authenticated customer.
+    2. The order is currently cancellable.
 
-    Returns the updated order if successful.
-    Returns None if the order does not exist.
+    customer_id comes from trusted application state,
+    not from Gemini.
     """
 
 
@@ -72,6 +75,7 @@ def cancel_order(order_id: str) -> dict | None:
     UPDATE orders
     SET status = 'cancelled'
     WHERE order_id = %s
+    AND custome_id=%s
       AND status IN ('pending', 'processing')
     RETURNING
         order_id,
@@ -80,7 +84,7 @@ def cancel_order(order_id: str) -> dict | None:
         expected_delivery,
         delivered_at;
     """,
-    (order_id,)
+    (order_id,customer_id)
 )
 
             order = cursor.fetchone()
@@ -89,25 +93,43 @@ def cancel_order(order_id: str) -> dict | None:
             if order is None:
                 return None
 
-            
             cursor.execute(
-                """
-                UPDATE orders
-                SET status = 'cancelled'
-                WHERE order_id = %s;
-                """,
-                (order_id,)
-            )
+                    """
+                    SELECT order_id, customer_id, status
+                    FROM orders
+                    WHERE order_id = %s
+                    """,
+                    (order_id,)
+                )
+            if order is None:
+                    return {
+                        "success": False,
+                        "code": "ORDER_NOT_FOUND",
+                        "message": "Order not found."
+                    }
 
-            
-            connection.commit()
+            if order[1] != customer_id:
+                    return {
+                        "success": False,
+                        "code": "ORDER_NOT_ACCESSIBLE",
+                        "message": "Order not found or not accessible."
+                    }
 
             return {
+                    "success": False,
+                    "code": "ORDER_NOT_CANCELLABLE",
+                    "message": "This order cannot be cancelled."
+                }
+            
+        connection.commit()
+
+        return {
                 "order_id": order[0],
                 "customer_id": order[1],
                 "status": "cancelled",
                 "expected_delivery": order[3],
-                "delivered_at": order[4]
+                "delivered_at": order[4],
+                "message": "Order cancelled successfully."
             }
 
     except Exception as e:
