@@ -1,0 +1,34 @@
+# Environment variables and secrets
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Git
+.git/
+.gitignore
+
+# Tests and local development files
+.pytest_cache/
+tests/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Local Chroma database
+chroma_db/
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db

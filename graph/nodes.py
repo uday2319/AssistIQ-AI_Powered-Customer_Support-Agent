@@ -1,15 +1,15 @@
 from langchain_google_genai import ChatGoogleGenerativeAI
-from db.queries import cancel_order
+from db.queries import cancel_order as cancel_order_in_db
 from config import GOOGLE_API_KEY
 from graph.state import SupportState
 from tools.order_tools import get_order_status
 from tools.customer_tools import get_customer
 from tools.knowledge_tools import search_knowledge_base
-from tools.cancellation_tools import cancel_order
 from langgraph.types import interrupt
 from tools.refund_tools import check_refund_eligibility, execute_refund
 from langgraph.types import interrupt
 from langchain_core.runnables import RunnableConfig
+from tools.cancellation_tools import cancel_order as cancel_order_tool
 
 from tools.refund_tools import (
     request_refund,
@@ -18,7 +18,7 @@ from tools.refund_tools import (
 )
 
 llm = ChatGoogleGenerativeAI(
-    model=+"gemini-3.6-flash",
+    model="gemini-3.6-flash",
     google_api_key=GOOGLE_API_KEY,
     max_retries=2
 )
@@ -26,7 +26,7 @@ llm = ChatGoogleGenerativeAI(
 llm_with_tools=llm.bind_tools([get_order_status, 
                                 get_customer, 
                                 search_knowledge_base,
-                                cancel_order,
+                                cancel_order_tool,
                                 request_refund
                                 ])
 
@@ -160,7 +160,7 @@ def cancel_order_node(state: SupportState):
     order_id = state["cancel_order_id"]
     customer_id = state["customer_id"]
 
-    result = cancel_order(
+    result = cancel_order_in_db(
         order_id=order_id,
         customer_id=customer_id
     )

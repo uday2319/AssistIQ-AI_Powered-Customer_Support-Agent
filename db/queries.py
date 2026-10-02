@@ -53,90 +53,88 @@ def find_order(order_id: str,customer_id:str) -> dict | None:
         
         connection.close()
 
-def cancel_order(order_id: str,customer_id:str) -> dict | None:
+def cancel_order(order_id: str, customer_id: str) -> dict:
     """
-    Cancel an order only if:
-    1. The order belongs to the authenticated customer.
-    2. The order is currently cancellable.
-
-    customer_id comes from trusted application state,
-    not from Gemini.
+    Cancel an order only when:
+    1. It belongs to the authenticated customer.
+    2. Its status allows cancellation.
     """
-
 
     connection = get_connection()
 
     try:
         with connection.cursor() as cursor:
 
-        
+            # The database checks ownership AND cancellability.
             cursor.execute(
-    """
-    UPDATE orders
-    SET status = 'cancelled'
-    WHERE order_id = %s
-    AND custome_id=%s
-      AND status IN ('pending', 'processing')
-    RETURNING
-        order_id,
-        customer_id,
-        status,
-        expected_delivery,
-        delivered_at;
-    """,
-    (order_id,customer_id)
-)
+                """
+                UPDATE orders
+                SET status = 'cancelled'
+                WHERE order_id = %s
+                  AND customer_id = %s
+                  AND status IN ('pending', 'processing')
+                RETURNING
+                    order_id,
+                    customer_id,
+                    status,
+                    expected_delivery,
+                    delivered_at;
+                """,
+                (order_id, customer_id)
+            )
 
             order = cursor.fetchone()
 
-    
-            if order is None:
-                return None
+            if order is not None:
+                # Cancellation succeeded.
+                connection.commit()
 
+                return {
+                    "success": True,
+                    "order_id": order[0],
+                    "customer_id": order[1],
+                    "status": order[2],
+                    "expected_delivery": order[3],
+                    "delivered_at": order[4],
+                    "message": "Order cancelled successfully."
+                }
+
+            # No UPDATE happened.
+            # Now determine why.
             cursor.execute(
-                    """
-                    SELECT order_id, customer_id, status
-                    FROM orders
-                    WHERE order_id = %s
-                    """,
-                    (order_id,)
-                )
-            if order is None:
-                    return {
-                        "success": False,
-                        "code": "ORDER_NOT_FOUND",
-                        "message": "Order not found."
-                    }
+                """
+                SELECT order_id, customer_id, status
+                FROM orders
+                WHERE order_id = %s
+                """,
+                (order_id,)
+            )
 
-            if order[1] != customer_id:
-                    return {
-                        "success": False,
-                        "code": "ORDER_NOT_ACCESSIBLE",
-                        "message": "Order not found or not accessible."
-                    }
+            existing_order = cursor.fetchone()
+
+            if existing_order is None:
+                return {
+                    "success": False,
+                    "code": "ORDER_NOT_FOUND",
+                    "message": "Order not found."
+                }
+
+            # Do not reveal another customer's order.
+            if existing_order[1] != customer_id:
+                return {
+                    "success": False,
+                    "code": "ORDER_NOT_ACCESSIBLE",
+                    "message": "Order not found or not accessible."
+                }
 
             return {
-                    "success": False,
-                    "code": "ORDER_NOT_CANCELLABLE",
-                    "message": "This order cannot be cancelled."
-                }
-            
-        connection.commit()
-
-        return {
-                "order_id": order[0],
-                "customer_id": order[1],
-                "status": "cancelled",
-                "expected_delivery": order[3],
-                "delivered_at": order[4],
-                "message": "Order cancelled successfully."
+                "success": False,
+                "code": "ORDER_NOT_CANCELLABLE",
+                "message": "This order cannot be cancelled."
             }
 
-    except Exception as e:
-        
+    except Exception:
         connection.rollback()
-
-        print(f"Database error: {e}")
         raise
 
     finally:

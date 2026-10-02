@@ -28,41 +28,49 @@ tool_node=ToolNode(tools)
 checkpointer=MemorySaver()
 
 def route_after_agent(state: SupportState):
+    """
+    Decide what the graph should do after Gemini responds.
+
+    Gemini can request:
+    - read-only tools
+    - refund workflow
+    - cancellation workflow
+
+    The application decides which path is allowed.
+    """
 
     last_message = state["messages"][-1]
-
-    if isinstance(last_message, AIMessage) and last_message.tool_calls:
+ 
+    if not isinstance(last_message, AIMessage) or not last_message.tool_calls:
         return "end"
+
 
     for tool_call in last_message.tool_calls:
 
-        tool_name = tool_call["name"]
-
+        tool_name = tool_call["name"] 
         if tool_name == "request_refund":
+
             order_id = tool_call["args"]["order_id"]
-
-                
             state["refund_order_id"] = order_id
-
+ 
             return "refund"
-
+ 
         if tool_name == "cancel_order":
 
             order_id = tool_call["args"]["order_id"]
 
             state["cancel_order_id"] = order_id
-
-            return "cancel"
-
  
-        if tool_name in ACTION_TOOLS:
+            return "cancel"
+ 
+        if tool_name in ACTION_TOOLS: 
             return "end"
-
+ 
         if tool_name in READ_TOOLS:
             continue
- 
-        return "end"
 
+        return "end"
+ 
     return "tools"
 
 def route_after_approval(state: SupportState):
