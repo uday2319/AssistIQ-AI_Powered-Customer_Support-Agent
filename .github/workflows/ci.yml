@@ -1,7 +1,7 @@
-name: CI
+name: CI/CD
 
-# Run CI when code is pushed to main
-# or when a pull request targets main.
+# Run CI/CD when code is pushed to main.
+# Run CI only for pull requests targeting main.
 on:
   push:
     branches: [main]
@@ -10,32 +10,30 @@ on:
 
 jobs:
   test-and-build:
-    # GitHub provides a fresh Ubuntu machine for this job.
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Download our GitHub repository onto the runner.
+      # 1. Download the repository.
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. Install Python 3.11, matching our Docker image.
+      # 2. Install Python 3.11.
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       # 3. Install application dependencies.
-      # sentence-transformers installs its required PyTorch dependency.
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest httpx
 
-      # 4. Run our automated tests.
+      # 4. Run automated tests.
       - name: Run tests
         env:
-          # Test values only. No real credentials are used.
+          # Test-only values. No real credentials are used.
           GOOGLE_API_KEY: test-key
           DB_HOST: localhost
           DB_PORT: "5432"
@@ -44,6 +42,39 @@ jobs:
           DB_PASSWORD: test-password
         run: pytest
 
-      # 5. Make sure the Docker image builds successfully.
+      # 5. Build the Docker image.
       - name: Build Docker image
         run: docker build -t ai-customer-support .
+
+      # 6. Authenticate GitHub Actions with Google Cloud.
+      - name: Authenticate to Google Cloud
+        if: github.event_name == 'push'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: github-deployer@ai-customer-support-510410.iam.gserviceaccount.com
+
+      # 7. Configure Docker to use Artifact Registry.
+      - name: Configure Docker
+        if: github.event_name == 'push'
+        run: gcloud auth configure-docker asia-south1-docker.pkg.dev --quiet
+
+      # 8. Push Docker image to Artifact Registry.
+      - name: Push Docker image
+        if: github.event_name == 'push'
+        run: |
+          docker tag ai-customer-support \
+            asia-south1-docker.pkg.dev/ai-customer-support-510410/ai-customer-support/ai-customer-support:latest
+
+          docker push \
+            asia-south1-docker.pkg.dev/ai-customer-support-510410/ai-customer-support/ai-customer-support:latest
+
+      # 9. Deploy the image to Cloud Run.
+      - name: Deploy to Cloud Run
+        if: github.event_name == 'push'
+        run: |
+          gcloud run deploy ai-customer-support \
+            --image=asia-south1-docker.pkg.dev/ai-customer-support-510410/ai-customer-support/ai-customer-support:latest \
+            --region=asia-south1 \
+            --platform=managed \
+            --quiet
