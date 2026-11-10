@@ -5,7 +5,7 @@ from tools.order_tools import get_order_status
 from tools.customer_tools import get_customer
 from tools.knowledge_tools import search_knowledge_base
 from tools.cancellation_tools import cancel_order 
-from langgraph.checkpoint.memory import MemorySaver
+from graph.checkpointer import create_checkpointer
 from langchain_core.messages import AIMessage
 from tools.permissions import READ_TOOLS, ACTION_TOOLS
 from tools.refund_tools import (
@@ -25,7 +25,9 @@ from graph.nodes import (
 tools=[get_order_status, get_customer, search_knowledge_base]
 tool_node=ToolNode(tools)
 
-checkpointer=MemorySaver()
+# Postgres by default, so conversations survive restarts.
+# See graph/checkpointer.py.
+checkpointer = create_checkpointer()
 
 def route_after_agent(state: SupportState):
     """

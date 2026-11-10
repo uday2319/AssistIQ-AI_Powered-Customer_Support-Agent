@@ -44,6 +44,8 @@ jobs:
           DB_NAME: customer_support
           DB_USER: postgres
           DB_PASSWORD: test-password
+          # Keep conversations in memory; CI has no database.
+          CHECKPOINT_BACKEND: memory
         run: pytest
 
       # 5. Build the Docker image.

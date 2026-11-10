@@ -13,6 +13,9 @@ DB_PASSWORD=os.getenv("DB_PASSWORD")
 # Gemini model used by the agent. Set GEMINI_MODEL in .env to change it.
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 
+# Where conversations are saved: "postgres" (default) or "memory" (tests).
+CHECKPOINT_BACKEND = os.getenv("CHECKPOINT_BACKEND", "postgres").strip().lower()
+
 # Secret key that support staff must send to approve or reject refunds.
 # If it is not set, the approval endpoint is disabled.
 ADMIN_API_KEY = os.getenv("ADMIN_API_KEY")

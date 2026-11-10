@@ -9,6 +9,7 @@ langchain
 langchain-core
 langchain-google-genai
 langgraph
+langgraph-checkpoint-postgres
 langsmith
 
 # RAG
@@ -22,4 +23,5 @@ streamlit
 
 # Database / configuration
 psycopg[binary]
+psycopg-pool
 python-dotenv
