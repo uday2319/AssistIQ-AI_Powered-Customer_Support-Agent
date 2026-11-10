@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import requests
 import uuid
@@ -7,7 +8,9 @@ import uuid
 # CONFIGURATION
 # ============================================================
 
-API_URL = "http://localhost:8000/chat"
+# Set SUPPORT_API_URL to point the UI at another server
+# (for example the Docker container on port 8080).
+API_URL = os.getenv("SUPPORT_API_URL", "http://localhost:8000").rstrip("/") + "/chat"
 
 
 # ============================================================
@@ -171,6 +174,64 @@ if "customer_id" not in st.session_state:
 if "order" not in st.session_state:
     st.session_state.order = None
 
+if "status" not in st.session_state:
+    st.session_state.status = "completed"
+
+
+def start_new_conversation():
+    """Clear the chat and start a new conversation ID."""
+    st.session_state.conversation_id = str(uuid.uuid4())
+    st.session_state.messages = []
+    st.session_state.order = None
+    st.session_state.status = "completed"
+
+
+def send_to_api(message: str) -> str:
+    """Send one message to FastAPI and return the reply text."""
+
+    payload = {
+        "customer_id": st.session_state.customer_id,
+        "conversation_id": st.session_state.conversation_id,
+        "message": message,
+    }
+
+    try:
+        response = requests.post(API_URL, json=payload, timeout=120)
+
+    except requests.exceptions.ConnectionError:
+        return (
+            "I couldn't connect to the support server. "
+            f"Make sure FastAPI is running at {API_URL}."
+        )
+
+    except requests.exceptions.Timeout:
+        return "The request took too long. Please try again."
+
+    except Exception:
+        return "Something went wrong while contacting the support agent."
+
+    # Gemini/API rate limit.
+    if response.status_code == 429:
+        return (
+            "The AI service is temporarily rate-limited. "
+            "Please try again shortly."
+        )
+
+    # Other API errors.
+    if response.status_code != 200:
+        return "The support service returned an error. Please try again."
+
+    data = response.json()
+
+    st.session_state.status = data.get("status", "completed")
+
+    # Save order information returned by FastAPI.
+    if data.get("order"):
+        st.session_state.order = data["order"]
+
+    return data.get("response") or "I couldn't generate a response."
+
+
 
 # ============================================================
 # HEADER
@@ -209,104 +270,24 @@ left, center, right = st.columns(
 # LEFT — NAVIGATION
 # ============================================================
 
+# Each button sends a ready-made message to the agent.
+# (The old "Navigation" buttons repeated these and never got a reply.)
+QUICK_ACTIONS = [
+    ("🚚  Track Order", "Track my order."),
+    ("❌  Cancel Order", "I want to cancel my order."),
+    ("↩️  Request Refund", "I want to request a refund."),
+    ("📖  Check Policy", "Tell me about your refund, cancellation and shipping policies."),
+    ("👨‍💼  Talk to Human", "I want to talk to a human support agent."),
+]
+
 with left:
-
-    st.subheader("Navigation")
-
-    if st.button("💬  Chat", key="nav_chat"):
-        pass
-
-    if st.button("📦  Orders", key="nav_orders"):
-        st.session_state.messages.append(
-            {
-                "role": "user",
-                "content": "Show me my order information.",
-            }
-        )
-        st.rerun()
-
-    if st.button("💰  Refunds", key="nav_refunds"):
-        st.session_state.messages.append(
-            {
-                "role": "user",
-                "content": "I want to request a refund.",
-            }
-        )
-        st.rerun()
-
-    if st.button("🚚  Track Order", key="nav_track"):
-        st.session_state.messages.append(
-            {
-                "role": "user",
-                "content": "Track my order.",
-            }
-        )
-        st.rerun()
-
-    if st.button("❓  Help & Policies", key="nav_policy"):
-        st.session_state.messages.append(
-            {
-                "role": "user",
-                "content": "Tell me about the refund, cancellation and shipping policies.",
-            }
-        )
-        st.rerun()
-
-
-    st.write("")
-    st.write("")
 
     st.subheader("Quick Actions")
 
-
-    if st.button("🚚  Track Order", key="quick_track"):
-        st.session_state.messages.append(
-            {
-                "role": "user",
-                "content": "Track my order.",
-            }
-        )
-        st.rerun()
-
-
-    if st.button("❌  Cancel Order", key="quick_cancel"):
-        st.session_state.messages.append(
-            {
-                "role": "user",
-                "content": "I want to cancel my order.",
-            }
-        )
-        st.rerun()
-
-
-    if st.button("↩️  Request Refund", key="quick_refund"):
-        st.session_state.messages.append(
-            {
-                "role": "user",
-                "content": "I want to request a refund.",
-            }
-        )
-        st.rerun()
-
-
-    if st.button("📖  Check Policy", key="quick_policy"):
-        st.session_state.messages.append(
-            {
-                "role": "user",
-                "content": "Tell me about your refund and cancellation policies.",
-            }
-        )
-        st.rerun()
-
-
-    if st.button("👨‍💼  Talk to Human", key="quick_human"):
-        st.session_state.messages.append(
-            {
-                "role": "user",
-                "content": "I want to talk to a human support agent.",
-            }
-        )
-        st.rerun()
+    for index, (label, text) in enumerate(QUICK_ACTIONS):
+        if st.button(label, key=f"quick_{index}"):
+            st.session_state.queued_message = text
+            st.rerun()
 
 
 # ============================================================
@@ -358,9 +339,19 @@ with center:
     # Chat input
     # --------------------------------------------------------
 
+    if st.session_state.status == "pending_approval":
+        st.info(
+            "⏳ A refund in this conversation is waiting for approval "
+            "by our support team."
+        )
+
     user_message = st.chat_input(
         "Message the AI support agent..."
     )
+
+    # Quick-action buttons queue their message here.
+    if user_message is None:
+        user_message = st.session_state.pop("queued_message", None)
 
 
     # --------------------------------------------------------
@@ -369,7 +360,7 @@ with center:
 
     if user_message:
 
-        # Add user's message to the UI immediately.
+        # Show the user's message right away.
         st.session_state.messages.append(
             {
                 "role": "user",
@@ -377,89 +368,18 @@ with center:
             }
         )
 
+        with st.chat_message("user"):
+            st.markdown(user_message)
 
-        # Data sent to FastAPI.
-        payload = {
-            "customer_id": st.session_state.customer_id,
-            "conversation_id": st.session_state.conversation_id,
-            "message": user_message,
-        }
+        with st.spinner("Thinking..."):
+            assistant_message = send_to_api(user_message)
 
-
-        try:
-
-            response = requests.post(
-                API_URL,
-                json=payload,
-                timeout=120,
-            )
-
-
-            # Gemini/API rate limit.
-            if response.status_code == 429:
-
-                assistant_message = (
-                    "The AI service is temporarily rate-limited. "
-                    "Please try again shortly."
-                )
-
-
-            # Other API errors.
-            elif response.status_code != 200:
-
-                assistant_message = (
-                    "The support service returned an error. "
-                    "Please try again."
-                )
-
-
-            else:
-
-                data = response.json()
-
-                assistant_message = data.get(
-                    "response",
-                    "I couldn't generate a response.",
-                )
-
-
-                # Save order information returned by FastAPI.
-                if data.get("order"):
-
-                    st.session_state.order = data["order"]
-
-
-        except requests.exceptions.ConnectionError:
-
-            assistant_message = (
-                "I couldn't connect to the support server. "
-                "Make sure FastAPI is running on port 8000."
-            )
-
-
-        except requests.exceptions.Timeout:
-
-            assistant_message = (
-                "The request took too long. Please try again."
-            )
-
-
-        except Exception as e:
-
-            assistant_message = (
-                "Something went wrong while contacting "
-                "the support agent."
-            )
-
-
-        # Add AI response.
         st.session_state.messages.append(
             {
                 "role": "assistant",
                 "content": assistant_message,
             }
         )
-
 
         # Refresh the page.
         st.rerun()
@@ -478,12 +398,14 @@ with right:
     # Customer ID
     # --------------------------------------------------------
 
-    customer_id = st.text_input(
+    # Changing the customer starts a fresh conversation, so one
+    # customer's chat history is never continued as another customer.
+    st.text_input(
         "Customer ID",
-        value=st.session_state.customer_id,
+        key="customer_id",
+        on_change=start_new_conversation,
+        help="Changing the customer starts a new conversation.",
     )
-
-    st.session_state.customer_id = customer_id
 
 
     # --------------------------------------------------------
@@ -587,13 +509,5 @@ with right:
         "🔄  New Conversation",
         key="new_conversation",
     ):
-
-        st.session_state.conversation_id = str(
-            uuid.uuid4()
-        )
-
-        st.session_state.messages = []
-
-        st.session_state.order = None
-
+        start_new_conversation()
         st.rerun()
