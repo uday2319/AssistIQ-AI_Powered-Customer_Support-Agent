@@ -20,6 +20,7 @@ from graph.nodes import (
     execute_refund_node,
     prepare_refund_node,
     prepare_cancellation_node,
+    confirm_cancellation_node,
     cancel_order_node
 )
 tools=[get_order_status, get_customer, search_knowledge_base]
@@ -93,6 +94,15 @@ def route_after_eligibility(state: SupportState):
 
     return "end"
 
+def route_after_confirmation(state: SupportState):
+    """
+    Cancel only if the customer clearly said yes.
+    """
+    if state.get("cancel_confirmed"):
+        return "confirmed"
+
+    return "end"
+
 builder = StateGraph(SupportState)
 
 builder.add_node("agent", agent_node)
@@ -118,6 +128,11 @@ builder.add_node(
 )
 
 builder.add_node(
+    "confirm_cancellation",
+    confirm_cancellation_node
+)
+
+builder.add_node(
     "cancel_order",
      cancel_order_node
 )
@@ -130,7 +145,16 @@ builder.add_edge(
 builder.add_edge("tools", "agent")
 builder.add_edge(
     "prepare_cancellation",
-    "cancel_order"
+    "confirm_cancellation"
+)
+
+builder.add_conditional_edges(
+    "confirm_cancellation",
+    route_after_confirmation,
+    {
+        "confirmed": "cancel_order",
+        "end": END
+    }
 )
 
 builder.add_edge(

@@ -44,8 +44,11 @@ class ChatResponse(BaseModel):
     """
     Standard response returned by our API.
 
-    status is "completed" for a normal reply, or "pending_approval"
-    when a refund is waiting for a support agent.
+    status is one of:
+    - "completed": a normal reply
+    - "pending_approval": a refund is waiting for a support agent
+    - "awaiting_confirmation": the agent asked the customer to confirm
+      a cancellation (the next message is treated as yes/no)
     order holds the latest order details shown in this turn (if any).
     """
     customer_id: str
@@ -112,12 +115,24 @@ def pending_approval_text(interrupt_value: dict) -> str:
 def build_response(customer_id: str, conversation_id: str, result: dict) -> ChatResponse:
     """Turn a LangGraph result into our API response."""
 
-    # The graph paused for human approval.
+    # The graph paused and is waiting for someone.
     if result.get("__interrupt__"):
+        value = result["__interrupt__"][0].value
+
+        # Waiting for the customer to confirm a cancellation.
+        if value.get("type") == "cancel_confirmation":
+            return ChatResponse(
+                customer_id=customer_id,
+                conversation_id=conversation_id,
+                response=value["message"],
+                status="awaiting_confirmation",
+            )
+
+        # Waiting for a support agent to approve a refund.
         return ChatResponse(
             customer_id=customer_id,
             conversation_id=conversation_id,
-            response=pending_approval_text(result["__interrupt__"][0].value),
+            response=pending_approval_text(value),
             status="pending_approval",
         )
 
@@ -182,10 +197,20 @@ def chat(request:chatRequest):
             "thread_id":request.conversation_id
         }    }
     try:
+        snapshot = support_graph.get_state(config)
+
+        # The agent asked "are you sure you want to cancel?".
+        # This message is the customer's answer, so resume with it.
+        if snapshot.interrupts and snapshot.interrupts[0].value.get("type") == "cancel_confirmation":
+            result = support_graph.invoke(
+                Command(resume=request.message),
+                config=config,
+            )
+            return build_response(request.customer_id, request.conversation_id, result)
+
         # If a refund in this conversation is still waiting for a
         # support agent, don't start a new run (it would lose the
         # pending approval). Just remind the customer.
-        snapshot = support_graph.get_state(config)
         if snapshot.interrupts:
             return ChatResponse(
                 customer_id=request.customer_id,
@@ -243,7 +268,7 @@ def decide_refund(
     config = {"configurable": {"thread_id": conversation_id}}
 
     snapshot = support_graph.get_state(config)
-    if not snapshot.interrupts:
+    if not snapshot.interrupts or snapshot.interrupts[0].value.get("type") != "refund_approval":
         raise HTTPException(
             status_code=404,
             detail="No refund is waiting for approval in this conversation."

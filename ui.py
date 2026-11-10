@@ -345,6 +345,20 @@ with center:
             "by our support team."
         )
 
+    # The agent asked "are you sure you want to cancel?".
+    if st.session_state.status == "awaiting_confirmation":
+        yes_col, no_col = st.columns(2)
+
+        with yes_col:
+            if st.button("✅  Yes, cancel it", key="confirm_yes"):
+                st.session_state.queued_message = "yes"
+                st.rerun()
+
+        with no_col:
+            if st.button("↩️  No, keep it", key="confirm_no"):
+                st.session_state.queued_message = "no"
+                st.rerun()
+
     user_message = st.chat_input(
         "Message the AI support agent..."
     )

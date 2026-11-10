@@ -158,3 +158,29 @@ def test_latest_order_reads_current_turn_only():
 
     # A new turn with no order lookup should not reuse the old order.
     assert latest_order(old_turn + [HumanMessage(content="thanks"), AIMessage(content="np")]) is None
+
+
+@patch.object(nodes, "cancel_order_in_db")
+@patch.object(nodes, "find_order", return_value={"order_id": "10490", "status": "pending"})
+def test_cancel_confirmation_through_chat(mock_find, mock_cancel):
+    mock_cancel.return_value = {
+        "success": True, "order_id": "10490", "status": "cancelled", "message": "ok",
+    }
+    cancel_call = AIMessage(
+        content="",
+        tool_calls=[{"name": "cancel_order", "args": {"order_id": "10490"}, "id": "c1"}],
+    )
+    body = {"customer_id": "C002", "conversation_id": str(uuid.uuid4()), "message": "Cancel 10490"}
+
+    with patch.object(nodes, "llm_with_tools", FakeLLM([cancel_call])):
+        response = client.post("/chat", json=body)
+        assert response.json()["status"] == "awaiting_confirmation"
+        assert "Are you sure" in response.json()["response"]
+        mock_cancel.assert_not_called()
+
+        # The customer's next message is the answer.
+        response = client.post("/chat", json={**body, "message": "yes"})
+
+    assert response.json()["status"] == "completed"
+    assert response.json()["order"]["status"] == "cancelled"
+    mock_cancel.assert_called_once_with(order_id="10490", customer_id="C002")

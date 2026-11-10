@@ -11,3 +11,4 @@ class SupportState(TypedDict,total=False):
     customer_id:str
     cancel_order_id: str
     cancel_result: dict
+    cancel_confirmed: bool

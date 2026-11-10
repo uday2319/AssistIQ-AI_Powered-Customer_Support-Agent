@@ -3,6 +3,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.types import interrupt
 
 from config import GOOGLE_API_KEY, GEMINI_MODEL
+from db.queries import CANCELLABLE_STATUSES, find_order
 from db.queries import cancel_order as cancel_order_in_db
 from graph.state import SupportState
 from prompts import build_system_prompt
@@ -44,6 +45,21 @@ def normalize_decision(decision) -> str:
     if str(decision).strip().lower() in APPROVAL_WORDS:
         return "approved"
     return "rejected"
+
+
+# Words that count as the customer saying "yes" to a cancellation.
+YES_WORDS = {"yes", "y", "yeah", "yep", "yup", "sure", "ok", "okay", "confirm", "confirmed"}
+# If any of these appear, we treat the answer as "no" to be safe.
+NO_WORDS = {"no", "not", "don't", "dont", "wait", "stop", "keep"}
+
+
+def is_yes(answer) -> bool:
+    """
+    True only for a clear yes ("yes", "Yes please", "ok, cancel it").
+    Anything unclear keeps the order, because cancelling can't be undone.
+    """
+    words = str(answer).lower().replace(",", " ").replace(".", " ").replace("!", " ").split()
+    return bool(words) and words[0] in YES_WORDS and not NO_WORDS.intersection(words)
 
 
 def answer_tool_calls(message: AIMessage, handled_tool: str, note: str) -> list[ToolMessage]:
@@ -223,6 +239,69 @@ def prepare_cancellation_node(state: SupportState):
             "cancel_order",
             f"Cancellation request for order {order_id} received."
         )
+    }
+
+
+def confirm_cancellation_node(state: SupportState):
+    """
+    Ask the customer to confirm before cancelling, because a
+    cancellation cannot be undone.
+
+    First check the order exists and can still be cancelled,
+    so we never ask "are you sure?" about an order we can't cancel.
+    """
+
+    order_id = state["cancel_order_id"]
+    customer_id = state["customer_id"]
+
+    order = find_order(order_id, customer_id)
+
+    if order is None:
+        return {
+            "cancel_confirmed": False,
+            "messages": [
+                AIMessage(content=f"Sorry, I couldn't find order {order_id} on your account.")
+            ],
+        }
+
+    if order["status"] not in CANCELLABLE_STATUSES:
+        return {
+            "cancel_confirmed": False,
+            "messages": [
+                AIMessage(
+                    content=(
+                        f"Order {order_id} is already {order['status']}, so it can't be "
+                        "cancelled. If it has shipped, you can request a refund "
+                        "after it arrives."
+                    )
+                )
+            ],
+        }
+
+    # Pause here until the customer answers.
+    answer = interrupt({
+        "type": "cancel_confirmation",
+        "order_id": order_id,
+        "status": order["status"],
+        "message": (
+            f"Order {order_id} is currently {order['status']}. "
+            "Are you sure you want to cancel it? Please reply yes or no."
+        ),
+    })
+
+    if is_yes(answer):
+        return {"cancel_confirmed": True}
+
+    return {
+        "cancel_confirmed": False,
+        "messages": [
+            AIMessage(
+                content=(
+                    f"Okay, I haven't cancelled order {order_id}. "
+                    "Is there anything else I can help with?"
+                )
+            )
+        ],
     }
 
 

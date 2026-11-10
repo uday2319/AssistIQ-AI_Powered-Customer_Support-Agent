@@ -130,8 +130,12 @@ def test_ineligible_refund_tells_customer_why(mock_check):
 # Cancellation workflow
 # ------------------------------------------------------------------
 
+PROCESSING_ORDER = {"order_id": "10490", "customer_id": "C002", "status": "processing"}
+
+
 @patch.object(nodes, "cancel_order_in_db")
-def test_cancel_uses_trusted_customer_and_conversation_continues(mock_cancel):
+@patch.object(nodes, "find_order", return_value=PROCESSING_ORDER)
+def test_cancel_asks_for_confirmation_then_cancels(mock_find, mock_cancel):
     mock_cancel.return_value = {"success": True, "message": "Order cancelled successfully."}
     fake = FakeLLM([
         tool_call_message("cancel_order", {"order_id": "10490"}),
@@ -142,6 +146,13 @@ def test_cancel_uses_trusted_customer_and_conversation_continues(mock_cancel):
     with patch.object(nodes, "llm_with_tools", fake):
         result = start(config, "Cancel order 10490", customer_id="C002")
 
+        # Nothing is cancelled until the customer confirms.
+        assert result["__interrupt__"][0].value["type"] == "cancel_confirmation"
+        mock_find.assert_called_with("10490", "C002")
+        mock_cancel.assert_not_called()
+
+        result = support_graph.invoke(Command(resume="Yes please"), config=config)
+
         mock_cancel.assert_called_once_with(order_id="10490", customer_id="C002")
         assert "cancelled" in result["messages"][-1].content
 
@@ -151,6 +162,50 @@ def test_cancel_uses_trusted_customer_and_conversation_continues(mock_cancel):
 
     assert result["messages"][-1].content == "Anything else I can help with?"
     assert_every_tool_call_answered(fake.calls[-1])
+
+
+@patch.object(nodes, "cancel_order_in_db")
+@patch.object(nodes, "find_order", return_value=PROCESSING_ORDER)
+def test_cancel_kept_when_customer_says_no(mock_find, mock_cancel):
+    fake = FakeLLM([tool_call_message("cancel_order", {"order_id": "10490"})])
+    config = new_config()
+
+    with patch.object(nodes, "llm_with_tools", fake):
+        start(config, "Cancel order 10490", customer_id="C002")
+        result = support_graph.invoke(Command(resume="no, keep it"), config=config)
+
+    mock_cancel.assert_not_called()
+    assert "haven't cancelled" in result["messages"][-1].content
+
+
+@patch.object(nodes, "cancel_order_in_db")
+@patch.object(nodes, "find_order")
+def test_cancel_skips_question_when_order_cannot_be_cancelled(mock_find, mock_cancel):
+    fake = FakeLLM([
+        tool_call_message("cancel_order", {"order_id": "10482"}),
+        tool_call_message("cancel_order", {"order_id": "99999"}),
+    ])
+
+    with patch.object(nodes, "llm_with_tools", fake):
+        # Already shipped: explain, don't ask "are you sure?".
+        mock_find.return_value = {"order_id": "10482", "status": "shipped"}
+        result = start(new_config(), "Cancel order 10482")
+        assert "__interrupt__" not in result
+        assert "already shipped" in result["messages"][-1].content
+
+        # Not found / someone else's order: same safe message.
+        mock_find.return_value = None
+        result = start(new_config(), "Cancel order 99999")
+        assert "couldn't find order 99999" in result["messages"][-1].content
+
+    mock_cancel.assert_not_called()
+
+
+def test_is_yes():
+    for answer in ["yes", "Yes please", "ok, cancel it", "Y", "confirm"]:
+        assert nodes.is_yes(answer), answer
+    for answer in ["no", "yes but wait", "not now", "what's the status?", "", None]:
+        assert not nodes.is_yes(answer), answer
 
 
 # ------------------------------------------------------------------

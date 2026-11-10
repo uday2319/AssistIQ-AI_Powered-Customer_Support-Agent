@@ -1,5 +1,9 @@
 from db.connection import get_connection
 
+# Orders can only be cancelled before they ship.
+# Used by the SQL below and by the confirmation step in the graph.
+CANCELLABLE_STATUSES = ("pending", "processing")
+
 
 def find_order(order_id: str,customer_id:str) -> dict | None:
     """
@@ -72,7 +76,7 @@ def cancel_order(order_id: str, customer_id: str) -> dict:
                 SET status = 'cancelled'
                 WHERE order_id = %s
                   AND customer_id = %s
-                  AND status IN ('pending', 'processing')
+                  AND status = ANY(%s)
                 RETURNING
                     order_id,
                     customer_id,
@@ -80,7 +84,7 @@ def cancel_order(order_id: str, customer_id: str) -> dict:
                     expected_delivery,
                     delivered_at;
                 """,
-                (order_id, customer_id)
+                (order_id, customer_id, list(CANCELLABLE_STATUSES))
             )
 
             order = cursor.fetchone()
