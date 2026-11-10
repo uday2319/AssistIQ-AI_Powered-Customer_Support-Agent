@@ -25,7 +25,7 @@ def check_refund_eligibility(order_id:str,customer_id: str)->dict:
     if order is None:
         return {
             "eligible":False,
-            "error":"ORDER_NOT_FUND",
+            "error":"ORDER_NOT_FOUND",
             "message":f"Order {order_id} was not found."}
     
     payment=find_payment(order_id)

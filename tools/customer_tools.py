@@ -1,15 +1,17 @@
+from typing import Annotated
+
 from langchain.tools import tool
-from pydantic import BaseModel, Field
+from langgraph.prebuilt import InjectedState
 
-class CustomerInput(BaseModel):
-    customer_id:str=Field(
-    min_lenth=1,
-    description="The customer's unique identifier.")
 
-@tool(args_schema=CustomerInput)
-def get_customer(customer_id: str) -> dict:
-    """Get basic information about a customer using their customer ID."""
- 
+@tool
+def get_customer(
+    customer_id: Annotated[str, InjectedState("customer_id")]
+) -> dict:
+    """Get basic information (name, email) about the current customer."""
+
+    # customer_id is injected by LangGraph from trusted state.
+    # Gemini cannot choose it, so it cannot look up other customers.
     customers = {
         "C001": {
             "name": "Uday",
@@ -21,22 +23,18 @@ def get_customer(customer_id: str) -> dict:
         }
     }
 
-    
     customer = customers.get(customer_id)
 
-    
     if customer is None:
         return {
             "success": False,
             "error": "CUSTOMER_NOT_FOUND",
-            "message": f"Customer {customer_id} was not found."
+            "message": "Customer was not found."
         }
 
-    
     return {
         "success": True,
         "customer_id": customer_id,
         "name": customer["name"],
         "email": customer["email"]
     }
-

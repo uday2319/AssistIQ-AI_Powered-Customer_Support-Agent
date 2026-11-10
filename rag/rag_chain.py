@@ -1,14 +1,14 @@
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 
-from config import GOOGLE_API_KEY
+from config import GOOGLE_API_KEY, GEMINI_MODEL
 from rag.retriever import get_retriever
 
 
 # Create the Gemini model.
 # Gemini will generate the final answer using the retrieved context.
 llm = ChatGoogleGenerativeAI(
-    model="gemini-3.6-flash",
+    model=GEMINI_MODEL,
     google_api_key=GOOGLE_API_KEY
 )
 
