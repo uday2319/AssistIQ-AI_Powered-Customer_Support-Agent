@@ -59,6 +59,8 @@ def assert_every_tool_call_answered(messages):
                 assert tool_call["id"] in answered
 
 
+REFUND_ARGS = {"order_id": "10483", "reason": "damaged", "reason_details": "screen cracked"}
+
 ELIGIBLE = {
     "eligible": True,
     "order_id": "10483",
@@ -76,7 +78,7 @@ ELIGIBLE = {
 @patch.object(nodes, "check_refund_eligibility", return_value=ELIGIBLE)
 def test_refund_pauses_then_runs_after_approval(mock_check, mock_execute):
     mock_execute.return_value = {"amount": 499.0, "message": "ok"}
-    fake = FakeLLM([tool_call_message("request_refund", {"order_id": "10483"})])
+    fake = FakeLLM([tool_call_message("request_refund", REFUND_ARGS)])
     config = new_config()
 
     with patch.object(nodes, "llm_with_tools", fake):
@@ -84,7 +86,7 @@ def test_refund_pauses_then_runs_after_approval(mock_check, mock_execute):
 
         # The graph must pause and wait for a human.
         assert "__interrupt__" in result
-        mock_check.assert_called_once_with("10483", "C001")
+        mock_check.assert_called_once_with("10483", "C001", "damaged")
         mock_execute.assert_not_called()
 
         # Different spellings of "approve" should all work.
@@ -98,7 +100,7 @@ def test_refund_pauses_then_runs_after_approval(mock_check, mock_execute):
 @patch.object(nodes, "execute_refund")
 @patch.object(nodes, "check_refund_eligibility", return_value=ELIGIBLE)
 def test_refund_rejected_does_not_move_money(mock_check, mock_execute):
-    fake = FakeLLM([tool_call_message("request_refund", {"order_id": "10483"})])
+    fake = FakeLLM([tool_call_message("request_refund", REFUND_ARGS)])
     config = new_config()
 
     with patch.object(nodes, "llm_with_tools", fake):
@@ -116,7 +118,7 @@ def test_ineligible_refund_tells_customer_why(mock_check):
         "error": "REFUND_WINDOW_EXPIRED",
         "message": "Order 10483 is outside the 7-day refund window.",
     }
-    fake = FakeLLM([tool_call_message("request_refund", {"order_id": "10483"})])
+    fake = FakeLLM([tool_call_message("request_refund", REFUND_ARGS)])
 
     with patch.object(nodes, "llm_with_tools", fake):
         result = start(new_config(), "Refund order 10483")

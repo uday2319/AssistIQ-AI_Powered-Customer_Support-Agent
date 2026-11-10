@@ -1,0 +1,36 @@
+# ==============================================================
+# Store policy: the ONE place these rules live.
+#
+# - The code enforces these rules (refund window, reasons,
+#   which orders can be cancelled, ...).
+# - The knowledge-base documents the agent answers from are
+#   generated from this file:  python -m utils.policy
+#
+# So the agent can never say something the system won't do.
+# A test fails if the documents and this file ever disagree.
+# ==============================================================
+
+refund:
+  # Days after delivery a customer can still ask for a refund.
+  window_days: 7
+
+  # The only reasons a refund is allowed for.
+  # key: short code the agent uses / value: what it means
+  allowed_reasons:
+    damaged: "the item arrived damaged"
+    defective: "the item is defective or does not work"
+    wrong_item: "a different item was delivered"
+
+  # Only payments in these states can be refunded.
+  refundable_payment_statuses: [paid]
+
+  processing_time: "5-7 business days"
+  paid_to: "the original payment method"
+
+cancellation:
+  # Orders can be cancelled only while in these states (before shipping).
+  cancellable_statuses: [pending, processing]
+
+shipping:
+  standard_delivery: "3-5 business days"
+  express_delivery: "1-2 business days"

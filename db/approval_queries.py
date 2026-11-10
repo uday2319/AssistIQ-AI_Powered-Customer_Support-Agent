@@ -32,6 +32,10 @@ def ensure_table():
                     requested_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
                     decided_at      TIMESTAMPTZ
                 );
+
+                -- Added later: why the customer wants the refund.
+                ALTER TABLE refund_approvals ADD COLUMN IF NOT EXISTS reason TEXT;
+                ALTER TABLE refund_approvals ADD COLUMN IF NOT EXISTS reason_details TEXT;
                 """
             )
         connection.commit()
@@ -46,6 +50,8 @@ def add_pending(
     order_id: str,
     payment_id: str,
     amount: float,
+    reason: str | None = None,
+    reason_details: str | None = None,
 ):
     """
     Put a refund in the queue. Safe to call more than once:
@@ -59,13 +65,16 @@ def add_pending(
             cursor.execute(
                 """
                 INSERT INTO refund_approvals
-                    (conversation_id, customer_id, order_id, payment_id, amount)
-                VALUES (%s, %s, %s, %s, %s)
+                    (conversation_id, customer_id, order_id, payment_id, amount,
+                     reason, reason_details)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (conversation_id) DO UPDATE SET
-                    customer_id  = EXCLUDED.customer_id,
-                    order_id     = EXCLUDED.order_id,
-                    payment_id   = EXCLUDED.payment_id,
-                    amount       = EXCLUDED.amount,
+                    customer_id    = EXCLUDED.customer_id,
+                    order_id       = EXCLUDED.order_id,
+                    payment_id     = EXCLUDED.payment_id,
+                    amount         = EXCLUDED.amount,
+                    reason         = EXCLUDED.reason,
+                    reason_details = EXCLUDED.reason_details,
                     status       = 'pending',
                     decided_at   = NULL,
                     -- keep the original time if it was already waiting
@@ -75,7 +84,8 @@ def add_pending(
                         ELSE now()
                     END;
                 """,
-                (conversation_id, customer_id, order_id, payment_id, amount),
+                (conversation_id, customer_id, order_id, payment_id, amount,
+                 reason, reason_details),
             )
         connection.commit()
     except Exception:
@@ -95,7 +105,8 @@ def list_pending() -> list[dict]:
             cursor.execute(
                 """
                 SELECT conversation_id, customer_id, order_id,
-                       payment_id, amount, requested_at
+                       payment_id, amount, requested_at,
+                       reason, reason_details
                 FROM refund_approvals
                 WHERE status = 'pending'
                 ORDER BY requested_at;
@@ -109,6 +120,8 @@ def list_pending() -> list[dict]:
                     "payment_id": row[3],
                     "amount": float(row[4]),
                     "requested_at": row[5].isoformat(),
+                    "reason": row[6],
+                    "reason_details": row[7],
                 }
                 for row in cursor.fetchall()
             ]

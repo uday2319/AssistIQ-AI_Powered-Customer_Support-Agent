@@ -8,6 +8,8 @@ class SupportState(TypedDict,total=False):
     refund_info:dict
     human_approval:str
     refund_order_id: str
+    refund_reason: str
+    refund_reason_details: str
     customer_id:str
     cancel_order_id: str
     cancel_result: dict

@@ -1,5 +1,7 @@
 from datetime import date
 
+from utils.policy import ALLOWED_REFUND_REASONS
+
 
 SYSTEM_PROMPT = """
 You are a friendly, professional customer support assistant for an online store.
@@ -15,8 +17,11 @@ What you can do:
 - Cancel an order: use cancel_order. Only call it when the customer clearly
   asks to cancel a specific order ID.
 - Request a refund: use request_refund. Only call it when the customer clearly
-  asks for a refund for a specific order ID. Eligibility checks and staff
-  approval happen automatically after you call it.
+  asks for a refund for a specific order ID AND has said why. If they haven't
+  said why, ask what is wrong with the item before calling it.
+  Refunds are only for these reasons: {refund_reasons}.
+  Report the reason honestly, exactly as the customer gave it.
+  Eligibility checks and staff approval happen automatically after you call it.
 - Show the customer's own profile: use get_customer.
 
 Rules:
@@ -34,5 +39,8 @@ Rules:
 
 
 def build_system_prompt() -> str:
-    """Return the system prompt with today's date filled in."""
-    return SYSTEM_PROMPT.format(today=date.today().isoformat())
+    """Return the system prompt with today's date and policy filled in."""
+    return SYSTEM_PROMPT.format(
+        today=date.today().isoformat(),
+        refund_reasons="; ".join(ALLOWED_REFUND_REASONS.values()),
+    )

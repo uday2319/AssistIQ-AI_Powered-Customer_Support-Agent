@@ -7,6 +7,7 @@ from db.queries import CANCELLABLE_STATUSES, find_order
 from db.queries import cancel_order as cancel_order_in_db
 from graph.state import SupportState
 from prompts import build_system_prompt
+from utils.policy import RULES
 from tools.cancellation_tools import cancel_order as cancel_order_tool
 from tools.customer_tools import get_customer
 from tools.knowledge_tools import search_knowledge_base
@@ -115,7 +116,10 @@ def human_approval_node(state: SupportState):
         "message": "Human approval required for this refund.",
         "order_id": refund_info["order_id"],
         "amount": refund_info["amount"],
-        "payment_id": refund_info["payment_id"]
+        "payment_id": refund_info["payment_id"],
+        # Shown to staff so they know why the customer wants it.
+        "reason": state.get("refund_reason"),
+        "reason_details": state.get("refund_reason_details"),
     })
 
     decision = normalize_decision(decision)
@@ -145,7 +149,11 @@ def refund_eligibility_node(state: SupportState):
     order_id = state["refund_order_id"]
     customer_id = state["customer_id"]
 
-    refund_info = check_refund_eligibility(order_id, customer_id)
+    refund_info = check_refund_eligibility(
+        order_id,
+        customer_id,
+        state.get("refund_reason", "other"),
+    )
 
     update = {"refund_info": refund_info}
 
@@ -199,10 +207,14 @@ def prepare_refund_node(state: SupportState):
         if tool_call["name"] == "request_refund"
     )
 
-    order_id = refund_tool_call["args"]["order_id"]
+    args = refund_tool_call["args"]
+    order_id = args["order_id"]
 
     return {
         "refund_order_id": order_id,
+        # A missing reason counts as "other", which the policy refuses.
+        "refund_reason": args.get("reason", "other"),
+        "refund_reason_details": args.get("reason_details", ""),
         "messages": answer_tool_calls(
             last_message,
             "request_refund",
@@ -271,8 +283,7 @@ def confirm_cancellation_node(state: SupportState):
                 AIMessage(
                     content=(
                         f"Order {order_id} is already {order['status']}, so it can't be "
-                        "cancelled. If it has shipped, you can request a refund "
-                        "after it arrives."
+                        f"cancelled. {RULES['cancel_before_shipping']}"
                     )
                 )
             ],

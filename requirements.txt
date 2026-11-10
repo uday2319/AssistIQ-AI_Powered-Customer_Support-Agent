@@ -25,3 +25,4 @@ streamlit
 psycopg[binary]
 psycopg-pool
 python-dotenv
+pyyaml

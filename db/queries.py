@@ -1,8 +1,8 @@
 from db.connection import get_connection
 
-# Orders can only be cancelled before they ship.
+# Orders can only be cancelled before they ship (set in policy.yaml).
 # Used by the SQL below and by the confirmation step in the graph.
-CANCELLABLE_STATUSES = ("pending", "processing")
+from utils.policy import CANCELLABLE_STATUSES
 
 
 def find_order(order_id: str,customer_id:str) -> dict | None:

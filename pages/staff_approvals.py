@@ -155,6 +155,13 @@ for item in pending:
         amount_col.metric("Amount", f"{item['amount']:,.2f}")
         wait_col.metric("Waiting", waiting_time(item["requested_at"]))
 
+        reason = (item.get("reason") or "not given").replace("_", " ")
+        details = item.get("reason_details")
+        st.markdown(
+            f"**Reason:** {reason}"
+            + (f' &nbsp;·&nbsp; *"{details}"*' if details else "")
+        )
+
         with st.expander("Conversation"):
             for line in item.get("transcript", []):
                 role = "user" if line["role"] == "customer" else "assistant"

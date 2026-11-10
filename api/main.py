@@ -1,5 +1,6 @@
 import hmac
 import json
+import logging
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from langchain_core.messages import HumanMessage, ToolMessage
@@ -9,6 +10,8 @@ from pydantic import BaseModel, Field
 import config as app_config
 from db import approval_queries
 from graph.graph import support_graph
+
+logger = logging.getLogger("support_api")
 
 app=FastAPI(title="AI Customer Support Agent",
             description="API for the Customer Support Agent",
@@ -158,6 +161,9 @@ def build_response(customer_id: str, conversation_id: str, result: dict) -> Chat
 
 
 def handle_graph_error(error: Exception):
+    # Log the real error for us; the customer only sees a safe message.
+    logger.exception("Agent request failed: %s", error)
+
     error_message = str(error)
 
     if "RESOURCE_EXHAUSTED" in error_message or "429" in error_message:
@@ -214,6 +220,8 @@ def queue_refund_for_staff(conversation_id: str, customer_id: str, value: dict):
         order_id=value["order_id"],
         payment_id=value["payment_id"],
         amount=value["amount"],
+        reason=value.get("reason"),
+        reason_details=value.get("reason_details"),
     )
 
 

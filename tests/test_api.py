@@ -15,10 +15,12 @@ class FakeApprovalQueue:
     def __init__(self):
         self.rows = {}
 
-    def add_pending(self, conversation_id, customer_id, order_id, payment_id, amount):
+    def add_pending(self, conversation_id, customer_id, order_id, payment_id, amount,
+                    reason=None, reason_details=None):
         self.rows[conversation_id] = {
             "conversation_id": conversation_id, "customer_id": customer_id,
             "order_id": order_id, "payment_id": payment_id, "amount": amount,
+            "reason": reason, "reason_details": reason_details,
             "requested_at": "2026-11-10T10:00:00", "status": "pending",
         }
 
@@ -116,7 +118,7 @@ class FakeLLM:
 def refund_tool_call():
     return AIMessage(
         content="",
-        tool_calls=[{"name": "request_refund", "args": {"order_id": "10483"}, "id": "c1"}],
+        tool_calls=[{"name": "request_refund", "args": {"order_id": "10483", "reason": "damaged", "reason_details": "box crushed"}, "id": "c1"}],
     )
 
 
@@ -239,6 +241,8 @@ def test_staff_queue_and_customer_update(mock_check, mock_execute, approval_queu
     assert len(pending) == 1
     assert pending[0]["order_id"] == "10483"
     assert pending[0]["amount"] == 499.0
+    assert pending[0]["reason"] == "damaged"
+    assert pending[0]["reason_details"] == "box crushed"
     assert {"role": "customer", "content": "Refund 10483"} in pending[0]["transcript"]
 
     # Customer checks for updates: still waiting.
