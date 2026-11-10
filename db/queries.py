@@ -86,7 +86,7 @@ def cancel_order(order_id: str, customer_id: str) -> dict:
             order = cursor.fetchone()
 
             if order is not None:
-                # Cancellation succeeded.
+
                 connection.commit()
 
                 return {
@@ -98,9 +98,7 @@ def cancel_order(order_id: str, customer_id: str) -> dict:
                     "delivered_at": order[4],
                     "message": "Order cancelled successfully."
                 }
-
-            # No UPDATE happened.
-            # Now determine why.
+ 
             cursor.execute(
                 """
                 SELECT order_id, customer_id, status

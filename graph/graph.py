@@ -90,8 +90,6 @@ def route_after_eligibility(state: SupportState):
     """
 
     refund_info = state["refund_info"]
-
-    
     if refund_info["eligible"]:
         return "approval"
 
