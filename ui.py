@@ -10,7 +10,8 @@ import uuid
 
 # Set SUPPORT_API_URL to point the UI at another server
 # (for example the Docker container on port 8080).
-API_URL = os.getenv("SUPPORT_API_URL", "http://localhost:8000").rstrip("/") + "/chat"
+API_BASE = os.getenv("SUPPORT_API_URL", "http://localhost:8000").rstrip("/")
+API_URL = API_BASE + "/chat"
 
 
 # ============================================================
@@ -232,6 +233,39 @@ def send_to_api(message: str) -> str:
     return data.get("response") or "I couldn't generate a response."
 
 
+def check_for_update() -> bool:
+    """
+    Ask the API whether staff have decided a pending refund.
+    If they have, show the agent's new message in the chat and
+    return True so the page refreshes.
+    """
+    try:
+        response = requests.get(
+            f"{API_BASE}/conversations/{st.session_state.conversation_id}",
+            params={"customer_id": st.session_state.customer_id},
+            timeout=30,
+        )
+    except requests.exceptions.RequestException:
+        st.toast("Couldn't reach the support server.")
+        return False
+
+    if response.status_code != 200:
+        st.toast("Couldn't check for updates. Please try again.")
+        return False
+
+    data = response.json()
+
+    if data["status"] == "pending_approval":
+        st.toast("Still waiting for our support team.")
+        return False
+
+    st.session_state.status = data["status"]
+    st.session_state.messages.append(
+        {"role": "assistant", "content": data["response"]}
+    )
+    return True
+
+
 
 # ============================================================
 # HEADER
@@ -344,6 +378,10 @@ with center:
             "⏳ A refund in this conversation is waiting for approval "
             "by our support team."
         )
+
+        if st.button("🔄  Check for updates", key="check_update"):
+            if check_for_update():
+                st.rerun()
 
     # The agent asked "are you sure you want to cancel?".
     if st.session_state.status == "awaiting_confirmation":

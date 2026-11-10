@@ -1,10 +1,43 @@
 from unittest.mock import patch
+
+import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 from api.main import app
 
 
 client = TestClient(app)
+
+
+class FakeApprovalQueue:
+    """In-memory stand-in for the refund_approvals table."""
+
+    def __init__(self):
+        self.rows = {}
+
+    def add_pending(self, conversation_id, customer_id, order_id, payment_id, amount):
+        self.rows[conversation_id] = {
+            "conversation_id": conversation_id, "customer_id": customer_id,
+            "order_id": order_id, "payment_id": payment_id, "amount": amount,
+            "requested_at": "2026-11-10T10:00:00", "status": "pending",
+        }
+
+    def list_pending(self):
+        return [
+            {k: v for k, v in row.items() if k != "status"}
+            for row in self.rows.values() if row["status"] == "pending"
+        ]
+
+    def mark_decided(self, conversation_id, decision):
+        self.rows[conversation_id]["status"] = decision
+
+
+@pytest.fixture(autouse=True)
+def approval_queue():
+    """Tests never touch the real database."""
+    queue = FakeApprovalQueue()
+    with patch("api.main.approval_queries", queue):
+        yield queue
 
 
 def test_root():
@@ -184,3 +217,53 @@ def test_cancel_confirmation_through_chat(mock_find, mock_cancel):
     assert response.json()["status"] == "completed"
     assert response.json()["order"]["status"] == "cancelled"
     mock_cancel.assert_called_once_with(order_id="10490", customer_id="C002")
+
+
+@patch.object(app_config, "ADMIN_API_KEY", "secret")
+@patch.object(nodes, "execute_refund", return_value={"amount": 499.0, "message": "ok"})
+@patch.object(nodes, "check_refund_eligibility", return_value=ELIGIBLE)
+def test_staff_queue_and_customer_update(mock_check, mock_execute, approval_queue):
+    conversation_id = str(uuid.uuid4())
+    staff = {"X-Admin-Key": "secret"}
+
+    with patch.object(nodes, "llm_with_tools", FakeLLM([refund_tool_call()])):
+        client.post("/chat", json={
+            "customer_id": "C001", "conversation_id": conversation_id, "message": "Refund 10483",
+        })
+
+    # Staff list needs the key.
+    assert client.get("/approvals").status_code == 401
+
+    # Staff see the refund with the customer's message.
+    pending = client.get("/approvals", headers=staff).json()["pending"]
+    assert len(pending) == 1
+    assert pending[0]["order_id"] == "10483"
+    assert pending[0]["amount"] == 499.0
+    assert {"role": "customer", "content": "Refund 10483"} in pending[0]["transcript"]
+
+    # Customer checks for updates: still waiting.
+    url = f"/conversations/{conversation_id}?customer_id=C001"
+    assert client.get(url).json()["status"] == "pending_approval"
+
+    # Staff reject it.
+    client.post(f"/approvals/{conversation_id}", json={"decision": "reject"}, headers=staff)
+    assert approval_queue.rows[conversation_id]["status"] == "rejected"
+    assert client.get("/approvals", headers=staff).json()["pending"] == []
+    mock_execute.assert_not_called()
+
+    # Customer checks again and sees the decision.
+    update = client.get(url).json()
+    assert update["status"] == "completed"
+    assert "not approved" in update["response"]
+
+
+def test_other_customer_cannot_use_conversation():
+    conversation_id = str(uuid.uuid4())
+    body = {"customer_id": "C001", "conversation_id": conversation_id, "message": "hi"}
+
+    with patch.object(nodes, "llm_with_tools", FakeLLM([AIMessage(content="Hello!")])):
+        assert client.post("/chat", json=body).status_code == 200
+
+    # Someone else using the same conversation ID is refused.
+    assert client.post("/chat", json={**body, "customer_id": "C002"}).status_code == 404
+    assert client.get(f"/conversations/{conversation_id}?customer_id=C002").status_code == 404
