@@ -21,6 +21,8 @@ from graph.nodes import (
     prepare_refund_node,
     prepare_cancellation_node,
     confirm_cancellation_node,
+    confirm_refund_reason_node,
+    blocked_tool_node,
     cancel_order_node
 )
 tools=[get_order_status, get_customer, search_knowledge_base]
@@ -60,13 +62,12 @@ def route_after_agent(state: SupportState):
         if tool_name == "cancel_order":
             return "cancel"
  
-        if tool_name in ACTION_TOOLS: 
-            return "end"
- 
         if tool_name in READ_TOOLS:
             continue
 
-        return "end"
+        # Any other tool (unknown, or an action with no safe workflow)
+        # is blocked. The customer gets a polite reply, not silence.
+        return "blocked"
  
     return "tools"
 
@@ -90,6 +91,15 @@ def route_after_eligibility(state: SupportState):
 
     refund_info = state["refund_info"]
     if refund_info["eligible"]:
+        return "confirm_reason"
+
+    return "end"
+
+def route_after_reason_confirmation(state: SupportState):
+    """
+    Send the refund to staff only if the customer confirmed the reason.
+    """
+    if state.get("refund_reason_confirmed"):
         return "approval"
 
     return "end"
@@ -114,9 +124,17 @@ builder.add_node(
 )
 
 builder.add_node(
+    "confirm_refund_reason",
+    confirm_refund_reason_node
+)
+
+builder.add_node(
     "human_approval",
     human_approval_node
 )
+
+builder.add_node("blocked_tool", blocked_tool_node)
+builder.add_edge("blocked_tool", END)
 
 builder.add_node(
     "execute_refund",
@@ -168,6 +186,7 @@ builder.add_conditional_edges(
         "tools": "tools",
         "refund": "prepare_refund",
         "cancel": "prepare_cancellation",
+        "blocked": "blocked_tool",
         "end": END
     }
 )
@@ -175,6 +194,15 @@ builder.add_conditional_edges(
 builder.add_conditional_edges(
     "refund_eligibility",
     route_after_eligibility,
+    {
+        "confirm_reason": "confirm_refund_reason",
+        "end": END
+    }
+)
+
+builder.add_conditional_edges(
+    "confirm_refund_reason",
+    route_after_reason_confirmation,
     {
         "approval": "human_approval",
         "end": END

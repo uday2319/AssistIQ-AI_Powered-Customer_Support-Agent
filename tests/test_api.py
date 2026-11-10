@@ -130,9 +130,14 @@ def test_refund_waits_for_admin_approval(mock_check, mock_execute):
     body = {"customer_id": "C001", "conversation_id": conversation_id, "message": "Refund 10483"}
 
     with patch.object(nodes, "llm_with_tools", FakeLLM([refund_tool_call()])):
-        # 1. Customer asks: the reply explains it's waiting for approval.
+        # 1. Customer asks: the agent checks the reason with them first.
         response = client.post("/chat", json=body)
         assert response.status_code == 200
+        assert response.json()["status"] == "awaiting_confirmation"
+        assert "damaged" in response.json()["response"]
+
+        # Customer confirms: the reply explains it's waiting for approval.
+        response = client.post("/chat", json={**body, "message": "yes"})
         assert response.json()["status"] == "pending_approval"
         assert "10483" in response.json()["response"]
 
@@ -229,9 +234,11 @@ def test_staff_queue_and_customer_update(mock_check, mock_execute, approval_queu
     staff = {"X-Admin-Key": "secret"}
 
     with patch.object(nodes, "llm_with_tools", FakeLLM([refund_tool_call()])):
-        client.post("/chat", json={
-            "customer_id": "C001", "conversation_id": conversation_id, "message": "Refund 10483",
-        })
+        body = {"customer_id": "C001", "conversation_id": conversation_id, "message": "Refund 10483"}
+        client.post("/chat", json=body)
+        # Nothing reaches staff until the customer confirms the reason.
+        assert client.get("/approvals", headers=staff).json()["pending"] == []
+        client.post("/chat", json={**body, "message": "yes"})
 
     # Staff list needs the key.
     assert client.get("/approvals").status_code == 401

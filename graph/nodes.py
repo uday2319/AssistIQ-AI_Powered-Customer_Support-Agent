@@ -7,7 +7,7 @@ from db.queries import CANCELLABLE_STATUSES, find_order
 from db.queries import cancel_order as cancel_order_in_db
 from graph.state import SupportState
 from prompts import build_system_prompt
-from utils.policy import RULES
+from utils.policy import ALLOWED_REFUND_REASONS, RULES
 from tools.cancellation_tools import cancel_order as cancel_order_tool
 from tools.customer_tools import get_customer
 from tools.knowledge_tools import search_knowledge_base
@@ -313,6 +313,76 @@ def confirm_cancellation_node(state: SupportState):
                 )
             )
         ],
+    }
+
+
+def confirm_refund_reason_node(state: SupportState):
+    """
+    Show the customer the reason the AI understood, and send the
+    refund to staff only if the customer agrees.
+
+    The code can't check whether the AI labelled the reason honestly
+    (e.g. "changed my mind" passed on as "damaged"). Asking the customer
+    means the AI's label is never trusted on its own.
+    """
+    order_id = state["refund_order_id"]
+    reason = state.get("refund_reason", "other")
+    meaning = ALLOWED_REFUND_REASONS.get(reason, reason)
+
+    answer = interrupt({
+        "type": "refund_reason_confirmation",
+        "order_id": order_id,
+        "reason": reason,
+        "message": (
+            f"Just to confirm: you'd like a refund for order {order_id} "
+            f"because {meaning}. Is that right? Please reply yes or no."
+        ),
+    })
+
+    if is_yes(answer):
+        return {"refund_reason_confirmed": True}
+
+    return {
+        "refund_reason_confirmed": False,
+        "messages": [
+            AIMessage(
+                content=(
+                    f"Okay, I haven't requested a refund for order {order_id}. "
+                    f"{RULES['refund_reasons']} If something is wrong with the item, "
+                    "tell me what happened and I'll help."
+                )
+            )
+        ],
+    }
+
+
+def blocked_tool_node(state: SupportState):
+    """
+    The AI tried a tool it isn't allowed to use (for example a made-up
+    "execute_refund"). Nothing runs. Answer every tool call so the
+    conversation stays valid, and reply politely instead of with
+    an empty message.
+    """
+    last_message = state["messages"][-1]
+
+    replies = [
+        ToolMessage(
+            content="Blocked: this action is not allowed.",
+            name=tool_call["name"],
+            tool_call_id=tool_call["id"],
+        )
+        for tool_call in last_message.tool_calls
+    ]
+
+    return {
+        "messages": replies + [
+            AIMessage(
+                content=(
+                    "Sorry, I can't do that. I can help you track an order, cancel an "
+                    "order that hasn't shipped, request a refund, or answer policy questions."
+                )
+            )
+        ]
     }
 
 

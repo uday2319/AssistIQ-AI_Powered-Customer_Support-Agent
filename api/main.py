@@ -13,6 +13,10 @@ from graph.graph import support_graph
 
 logger = logging.getLogger("support_api")
 
+# Pauses where the graph waits for the CUSTOMER to answer yes/no.
+# (A refund_approval pause waits for staff instead.)
+CUSTOMER_QUESTIONS = {"cancel_confirmation", "refund_reason_confirmation"}
+
 app=FastAPI(title="AI Customer Support Agent",
             description="API for the Customer Support Agent",
             version="1.0.0")
@@ -123,8 +127,8 @@ def build_response(customer_id: str, conversation_id: str, result: dict) -> Chat
     if result.get("__interrupt__"):
         value = result["__interrupt__"][0].value
 
-        # Waiting for the customer to confirm a cancellation.
-        if value.get("type") == "cancel_confirmation":
+        # Waiting for the customer to confirm (a cancellation or a refund reason).
+        if value.get("type") in CUSTOMER_QUESTIONS:
             return ChatResponse(
                 customer_id=customer_id,
                 conversation_id=conversation_id,
@@ -262,9 +266,10 @@ def chat(request:chatRequest):
 
         waiting_for = pending_interrupt(snapshot)
 
-        # The agent asked "are you sure you want to cancel?".
+        # The agent asked the customer a yes/no question
+        # (confirm a cancellation or a refund reason).
         # This message is the customer's answer, so resume with it.
-        if waiting_for and waiting_for.get("type") == "cancel_confirmation":
+        if waiting_for and waiting_for.get("type") in CUSTOMER_QUESTIONS:
             result = support_graph.invoke(
                 Command(resume=request.message),
                 config=config,

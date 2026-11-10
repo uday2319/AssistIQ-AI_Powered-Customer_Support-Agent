@@ -10,6 +10,7 @@ class SupportState(TypedDict,total=False):
     refund_order_id: str
     refund_reason: str
     refund_reason_details: str
+    refund_reason_confirmed: bool
     customer_id:str
     cancel_order_id: str
     cancel_result: dict

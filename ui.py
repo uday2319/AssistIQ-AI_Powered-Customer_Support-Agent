@@ -383,17 +383,17 @@ with center:
             if check_for_update():
                 st.rerun()
 
-    # The agent asked "are you sure you want to cancel?".
+    # The agent asked a yes/no question (confirm a cancellation or a refund reason).
     if st.session_state.status == "awaiting_confirmation":
         yes_col, no_col = st.columns(2)
 
         with yes_col:
-            if st.button("✅  Yes, cancel it", key="confirm_yes"):
+            if st.button("✅  Yes", key="confirm_yes"):
                 st.session_state.queued_message = "yes"
                 st.rerun()
 
         with no_col:
-            if st.button("↩️  No, keep it", key="confirm_no"):
+            if st.button("↩️  No", key="confirm_no"):
                 st.session_state.queued_message = "no"
                 st.rerun()
 
