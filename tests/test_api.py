@@ -49,3 +49,112 @@ def test_chat_success(mock_invoke):
     )
 
     mock_invoke.assert_called_once()
+
+# ------------------------------------------------------------------
+# Refund approval through the API
+# ------------------------------------------------------------------
+
+import json
+import uuid
+
+from langchain_core.messages import HumanMessage, ToolMessage
+
+import config as app_config
+from api.main import latest_order
+from graph import nodes
+
+ELIGIBLE = {
+    "eligible": True,
+    "order_id": "10483",
+    "payment_id": "P1",
+    "amount": 499.0,
+    "message": "Order is eligible for a refund.",
+}
+
+
+class FakeLLM:
+    def __init__(self, responses):
+        self.responses = list(responses)
+
+    def invoke(self, messages):
+        return self.responses.pop(0)
+
+
+def refund_tool_call():
+    return AIMessage(
+        content="",
+        tool_calls=[{"name": "request_refund", "args": {"order_id": "10483"}, "id": "c1"}],
+    )
+
+
+@patch.object(app_config, "ADMIN_API_KEY", "secret")
+@patch.object(nodes, "execute_refund", return_value={"amount": 499.0, "message": "ok"})
+@patch.object(nodes, "check_refund_eligibility", return_value=ELIGIBLE)
+def test_refund_waits_for_admin_approval(mock_check, mock_execute):
+    conversation_id = str(uuid.uuid4())
+    body = {"customer_id": "C001", "conversation_id": conversation_id, "message": "Refund 10483"}
+
+    with patch.object(nodes, "llm_with_tools", FakeLLM([refund_tool_call()])):
+        # 1. Customer asks: the reply explains it's waiting for approval.
+        response = client.post("/chat", json=body)
+        assert response.status_code == 200
+        assert response.json()["status"] == "pending_approval"
+        assert "10483" in response.json()["response"]
+
+        # 2. Another customer message while waiting: still pending, no crash.
+        response = client.post("/chat", json={**body, "message": "any update?"})
+        assert response.json()["status"] == "pending_approval"
+
+        # 3. Wrong or missing admin key is refused.
+        url = f"/approvals/{conversation_id}"
+        assert client.post(url, json={"decision": "approved"}).status_code == 401
+        assert client.post(
+            url, json={"decision": "approved"}, headers={"X-Admin-Key": "wrong"}
+        ).status_code == 401
+        mock_execute.assert_not_called()
+
+        # 4. Staff approves with the right key: refund is executed.
+        response = client.post(
+            url, json={"decision": "approved"}, headers={"X-Admin-Key": "secret"}
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+    assert "processed" in response.json()["response"]
+    mock_execute.assert_called_once()
+
+    # 5. Nothing left to approve.
+    response = client.post(
+        f"/approvals/{conversation_id}",
+        json={"decision": "approved"},
+        headers={"X-Admin-Key": "secret"},
+    )
+    assert response.status_code == 404
+
+
+@patch.object(app_config, "ADMIN_API_KEY", None)
+def test_approvals_disabled_without_admin_key():
+    response = client.post(
+        "/approvals/anything",
+        json={"decision": "approved"},
+        headers={"X-Admin-Key": "x"},
+    )
+    assert response.status_code == 503
+
+
+def test_latest_order_reads_current_turn_only():
+    order_json = json.dumps({
+        "found": True, "order_id": "10490",
+        "status": "processing", "expected_delivery": "2026-11-12",
+    })
+    old_turn = [
+        HumanMessage(content="where is 10490"),
+        ToolMessage(content=order_json, name="get_order_status", tool_call_id="a"),
+        AIMessage(content="It's processing."),
+    ]
+
+    # Order found in this turn.
+    assert latest_order(old_turn)["status"] == "processing"
+
+    # A new turn with no order lookup should not reuse the old order.
+    assert latest_order(old_turn + [HumanMessage(content="thanks"), AIMessage(content="np")]) is None
