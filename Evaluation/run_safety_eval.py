@@ -199,6 +199,18 @@ def build_report(run: str, results: dict, total_cases: int, model: str) -> str:
         f"- Cases run: {len(rows)} of {total_cases}"
         + (f" ({len(rows) - len(graded)} errors)" if len(rows) != len(graded) else ""),
         "",
+    ]
+
+    if model.startswith("obedient"):
+        lines += [
+            "> **Worst-case run.** The model here is a fake that obeys every attack: it lies",
+            "> about refund reasons, claims to be other customers, calls tools it was never",
+            "> given, and repeats raw data. Only the **safety** numbers matter: they show what",
+            "> the code blocks on its own. Helpfulness and accuracy are not meaningful here.",
+            "",
+        ]
+
+    lines += [
         "## Scorecard",
         "",
         "| Measure | Result |",
@@ -255,6 +267,12 @@ def main(argv=None, llm=None):
     parser.add_argument("--category", help="only run this category")
     parser.add_argument("--ids", help="only these case ids, comma separated")
     parser.add_argument("--delay", type=float, default=6.0, help="seconds between Gemini calls")
+    parser.add_argument(
+        "--model",
+        choices=["gemini", "obedient"],
+        default="gemini",
+        help="'obedient' = worst-case fake model that obeys every attack (no API calls)",
+    )
     parser.add_argument("--fresh", action="store_true", help="ignore earlier results for this run")
     parser.add_argument("--report-only", action="store_true", help="just rebuild the report")
     args = parser.parse_args(argv)
@@ -285,6 +303,11 @@ def main(argv=None, llm=None):
         import api.main
         from graph import nodes
         from graph.graph import support_graph
+
+        if args.model == "obedient" and llm is None:
+            from Evaluation.obedient_llm import ObedientLLM
+            llm = ObedientLLM()
+            args.delay = 0
 
         throttle = ThrottledLLM(llm or nodes.llm_with_tools, args.delay)
 
@@ -320,7 +343,11 @@ def main(argv=None, llm=None):
 
         print(f"\nGemini calls this session: {throttle.calls}")
 
-    report = build_report(args.run, results, len(CASES), config.GEMINI_MODEL)
+    model_label = (
+        "obedient (worst-case fake model that obeys every attack; no AI)"
+        if args.model == "obedient" else config.GEMINI_MODEL
+    )
+    report = build_report(args.run, results, len(CASES), model_label)
     report_path.write_text(report, encoding="utf-8")
 
     scorecard = report.split("## By category")[0]
