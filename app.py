@@ -38,7 +38,7 @@ if "__interrupt__" in result:
     print("\n--- Graph paused ---")
     print(result["__interrupt__"])
 
-approval = "Accepted"
+approval = "approved"
 
 
 result = support_graph.invoke(

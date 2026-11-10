@@ -47,20 +47,14 @@ def route_after_agent(state: SupportState):
 
     for tool_call in last_message.tool_calls:
 
-        tool_name = tool_call["name"] 
+        tool_name = tool_call["name"]
+
+        # Routers only choose the next step. They cannot change state,
+        # so the order ID is saved by prepare_refund / prepare_cancellation.
         if tool_name == "request_refund":
-
-            order_id = tool_call["args"]["order_id"]
-            state["refund_order_id"] = order_id
- 
             return "refund"
- 
+
         if tool_name == "cancel_order":
-
-            order_id = tool_call["args"]["order_id"]
-
-            state["cancel_order_id"] = order_id
- 
             return "cancel"
  
         if tool_name in ACTION_TOOLS: 
@@ -77,6 +71,8 @@ def route_after_approval(state: SupportState):
     """
     Decide what to do after the human responds.
     """
+    # human_approval_node already turned the decision into
+    # exactly "approved" or "rejected".
     decision = state["human_approval"]
 
     if decision == "approved":
