@@ -4,3 +4,6 @@ venv/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
+# Generated vector database (rebuilt automatically from knowledge_base/)
+chroma_db/
+.pytest_cache/

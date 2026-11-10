@@ -3,9 +3,11 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 def split_documents():
     documents=load_knowledge_base()
+    # 100 characters cut policies in the middle of sentences.
+    # 500 keeps each rule together with its context.
     splitter=RecursiveCharacterTextSplitter(
-        chunk_size=100,
-        chunk_overlap=20
+        chunk_size=500,
+        chunk_overlap=50
     )
 
     chunks = splitter.split_documents(documents)

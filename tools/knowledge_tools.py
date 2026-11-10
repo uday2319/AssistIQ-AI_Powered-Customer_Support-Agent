@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from langchain.tools import tool
 from rag.retriever import get_retriever
 
@@ -16,6 +18,8 @@ def search_knowledge_base(query: str) -> str:
 
     results=[]
     for doc in documents:
-        results.append(doc.page_content)
+        # Include the file name so the agent can say where the answer came from.
+        source = Path(doc.metadata.get("source", "unknown")).name
+        results.append(f"[Source: {source}]\n{doc.page_content}")
 
     return "\n\n".join(results)
